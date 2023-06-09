@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+	<title>The YUAG search application</title>
+   <link rel="stylesheet" href="/static/styles.css" id="cssurl">
+	
+	<script>
+      'use strict'
+      let request = null;
+      let currentPage = 1;
+      const itemsPerPage = 10;
+      let allResults = [];
+      
+      async function onRowClick(){
+         const row = event.target.closest("tr");
+         if (!row) return;
+         const obj_id = row.getAttribute("data-id");
+         window.open(`/obj/${obj_id}`, '_blank');
+      }
+
+      async function searchResults(url) {
+         const response = await fetch(url);
+         return await response.json();
+      }
+
+      function addRowEventListeners() {
+         document.querySelectorAll("#resultsTableBody tr").forEach(row => {
+            row.addEventListener("click", onRowClick);
+         });
+      }
+
+      function writeCookie(){
+         document.cookie = `label=${$('#label').val()};classifier=${$('#classifier').val()};agent=${$('#agent').val()};department=${$('#department').val()}`;
+      }
+
+      function updatePaginationButtons(totalPages) {
+         const pagination = $("#pagination");
+         pagination.html("");
+     
+         if (totalPages > 1) {
+             const prevButton = $('<button id="prev">Prev</button>');
+             prevButton.prop("disabled", currentPage === 1);
+             prevButton.click(() => {
+                 currentPage--;
+                 getResults();
+             });
+     
+             const nextButton = $('<button id="next">Next</button>');
+             nextButton.prop("disabled", currentPage === totalPages);
+             nextButton.click(() => {
+                 currentPage++;
+                 getResults();
+             });
+     
+             pagination.append(prevButton);
+     
+             for (let i = 1; i <= totalPages; i++) {
+                 const pageButton = $(`<button class="page">${i}</button>`);
+                 if (i === currentPage) {
+                     pageButton.addClass("active");
+                 }
+                 pageButton.click(() => {
+                     currentPage = i;
+                     getResults();
+                 });
+     
+                 pagination.append(pageButton);
+             }
+     
+             pagination.append(nextButton);
+         }
+     }
+
+      function displayResultsChunk() {
+         const table = $("#resultsTable");
+         const tbody = $("#resultsTableBody");
+     
+         if (!allResults || allResults.length === 0) {
+             table.hide();
+             tbody.html("");
+             $("#pagination").html("");
+         } else {
+             table.show();
+             $("#pagination").show();
+     
+             const totalPages = Math.ceil(allResults.length / itemsPerPage);
+             updatePaginationButtons(totalPages);
+     
+             const startIndex = (currentPage - 1) * itemsPerPage;
+             const endIndex = startIndex + itemsPerPage;
+             const currentResults = allResults.slice(startIndex, endIndex);
+     
+             tbody.html(currentResults.map(result => `
+                 <tr data-id="${result[0]}" data-label="${result[1]}">
+                     <td>${result[1]}</td>
+                     <td>${result[2]}</td>
+                     <td>${result[3] ? result[3].split('|').join('<br>') : ''}</td>
+                     <td>${result[4] ? result[4].split('|').join('<br>') : ''}</td>
+                 </tr>
+             `).join("\n"));
+     
+             writeCookie();
+             addRowEventListeners();
+         }
+     }
+
+      function updateResultsTable(results) {
+         const table = $("#resultsTable");
+         const tbody = $("#resultsTableBody");
+         
+         if (!results || results === "no response") {
+            console.log("!!!")
+            table.hide();
+            tbody.innerHTML = "";
+         } else {
+            table.show();
+            tbody.html(results.map(result => `
+               <tr data-id="${result[0]}" data-label=""${result[1]}>
+                  <td>${result[1]}</td>
+                  <td>${result[2]}</td>
+                  <td>${result[3] ? result[3].split('|').join('<br>') : ''}</td>
+                  <td>${result[4] ? result[4].split('|').join('<br>') : ''}</td>
+               </tr>
+            `).join("\n"));
+         
+            writeCookie();
+            addRowEventListeners();
+         }
+      }
+      
+      async function getResults(resetResults = false)
+      {
+         if (resetResults) {
+            allResults = [];
+         }
+
+         if ($('#label').val() === '' && $('#classifier').val() === '' && $('#agent').val() === '' && $('#department').val() === '') {
+            $("#resultsTable").hide();
+            $("#pagination").hide();
+            allResults = [];
+
+            if (request != null) {
+               request.abort();
+            }
+            return;
+        }
+
+         if (allResults.length === 0) {
+            const params = {
+               l: encodeURIComponent($('#label').val()),
+               c: encodeURIComponent($('#classifier').val()),
+               a: encodeURIComponent($('#agent').val()),
+               d: encodeURIComponent($('#department').val())
+            };
+   
+            const url = `/searchresults?l=${params.l}&c=${params.c}&a=${params.a}&d=${params.d}`;
+   
+            if (request != null) request.abort();
+            
+            request = $.ajax({
+               type: 'GET',
+               url: url,
+               success: data => {
+                  allResults = data.results;
+                  displayResultsChunk();
+               },
+               error: (xhr, status, error) => console.log('AJAX request error:', error)
+            });
+         } else {
+            displayResultsChunk();
+         }
+      }
+
+      function getResultsURL() {
+         const urlParams = new URLSearchParams(window.location.search);
+
+         if (![...urlParams.keys()].length) return;
+
+         const url = `/searchresults?${urlParams.toString()}`;
+         
+         if (request != null) request.abort();
+
+         request = $.ajax({
+            type: 'GET',
+            url: url,
+            success: data => updateResultsTable(data.results),
+            error: (xhr, status, error) => console.log('AJAX request error:', error)
+         });
+      }
+
+      function setup()
+      {
+         const searchResults = sessionStorage.getItem('searchResults');
+         
+         if (searchResults) {
+            const {label, date, agent, classifiedAs, url} = JSON.parse(searchResults);
+            $('#label').val(label);
+            $('#date').val(date);
+            $('#agent').val(agent);
+            $('#classifier').val(classifiedAs);
+            
+            if (request != null) request.abort();
+            
+            request = $.ajax({
+               type: 'GET',
+               url: url,
+               success: data => updateResultsTable(data.results),
+               error: (xhr, status, error) => console.log('AJAX request error:', error)
+            });
+            
+            sessionStorage.clear();
+         }
+
+         $('#label, #classifier, #agent, #department').on('input', function() {
+            currentPage = 1;
+            getResults(true);
+         });
+
+         if ($('#label').val() || $('#classifier').val() || $('#agent').val() || $('#department').val()) {
+            currentPage = 1;
+            getResults(true);
+        }
+      }
+
+      $('document').ready(setup);
+	</script>
+</head>
+<body>
+   <h1><strong>YUAN Collection Search</strong></h1>
+	<form id="form">
+      <label for="label">Label:</label>
+      <input type="text" id="label" name="label" value="{{ label }}"><br>
+      <br>
+      <label for="classifier">Classifier:</label>
+      <input type="text" id="classifier" name="classifier" value="{{ classification }}"><br>
+      <br>
+      <label for="agent">Agent:</label>
+      <input type="text" id="agent" name="agent" value="{{ agent }}"><br>
+      <br>
+      <label for="department">Department:</label>
+      <input type="text" id="department" name="department" value="{{ department }}"><br>
+      <br>
+  </form>
+   <table id="resultsTable" style="display: none;">
+      <thead>
+          <tr>
+              <th>Label</th>
+              <th>Date</th>
+              <th>Agents</th>
+              <th>Classified As</th>
+          </tr>
+      </thead>
+      <tbody id="resultsTableBody"></tbody>
+   </table>
+   <div class="pagination" id="pagination"></div>
+</body>
+</html>

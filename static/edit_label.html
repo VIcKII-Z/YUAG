@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+
+{% block content %}
+  <h1>Edit Label</h1>
+  <form method="POST">
+    <textarea name="label" rows="5" cols="50">{{ obj.label }}</textarea>
+    <br>
+    <input type="submit" value="Submit">
+  </form>
+{% endblock %}
+</html>
